@@ -36,7 +36,7 @@ const SCALES = {
   lydian: [0, 2, 4, 6, 7, 9, 11],
 };
 
-const LAYERS = ["kick", "sub", "snare", "clap", "hat", "ohat", "perc", "bass", "acid", "stab", "pad"];
+const LAYERS = ["kick", "sub", "snare", "clap", "hat", "ohat", "perc", "bass", "acid", "stab", "pad", "piano"];
 
 // ミキサーが持つチャンネル。演奏レイヤーに加えてFX(ライザー)も含む。
 const MIX = [...LAYERS, "fx"];
@@ -45,6 +45,7 @@ const MIX = [...LAYERS, "fx"];
 const DEFAULT_LEVELS = {
   kick: 0.90, sub: 0.26, snare: 0.30, clap: 0.34, hat: 0.24, ohat: 0.16,
   perc: 0.15, bass: 0.26, acid: 0.20, stab: 0.16, pad: 0.15,
+  piano: 0.24,
   fx: 0.10,
 };
 const LAYER_JP = {
@@ -59,13 +60,14 @@ const LAYER_JP = {
   acid: "ACID",
   stab: "STAB",
   pad: "PAD",
+  piano: "PIANO",
   fx: "RISER",
 };
 
 const GATES = {
-  TECHNO: { kick: 0.02, sub: 0.1, hat: 0.14, bass: 0.22, pad: 0.34, perc: 0.3, clap: 0.38, ohat: 0.5, acid: 0.52, snare: 0.58, stab: 0.66 },
-  MINIMAL: { stab: 0.02, pad: 0.05, perc: 0.1, bass: 0.2, hat: 0.28, kick: 0.35, sub: 0.45, ohat: 0.62, acid: 0.7, clap: 0.8, snare: 0.86 },
-  EDM: { kick: 0.05, sub: 0.12, pad: 0.15, hat: 0.18, bass: 0.25, snare: 0.28, clap: 0.3, ohat: 0.4, perc: 0.42, stab: 0.48, acid: 0.6 },
+  TECHNO: { kick: 0.02, sub: 0.1, hat: 0.14, bass: 0.22, pad: 0.34, perc: 0.3, clap: 0.38, ohat: 0.5, acid: 0.52, snare: 0.58, piano: 0.6, stab: 0.66 },
+  MINIMAL: { stab: 0.02, pad: 0.05, piano: 0.08, perc: 0.1, bass: 0.2, hat: 0.28, kick: 0.35, sub: 0.45, ohat: 0.62, acid: 0.7, clap: 0.8, snare: 0.86 },
+  EDM: { kick: 0.05, sub: 0.12, pad: 0.15, hat: 0.18, bass: 0.25, snare: 0.28, clap: 0.3, ohat: 0.4, perc: 0.42, piano: 0.46, stab: 0.48, acid: 0.6 },
 };
 
 const MODEP = {
@@ -373,6 +375,33 @@ function buildAudio(lite) {
   pad.maxPolyphony = lite ? 5 : 10;
   padGain.connect(verbSend);
 
+  // PIANO — Salamander Grand Piano のマルチサンプル。数音を読み込んで
+  // Tone.Sampler が音階を補間する。低域はbass/subに譲るためHPで削り、
+  // 空間はverb/delay送りで作る。読み込みは非同期なので loaded を見て鳴らす。
+  const pianoHP = keep(new Tone.Filter({ frequency: 130, type: "highpass", rolloff: -12 })).connect(
+    ch("piano", duck)
+  );
+  const pianoUrls = lite
+    ? { C2: "C2.mp3", C3: "C3.mp3", C4: "C4.mp3", C5: "C5.mp3", C6: "C6.mp3" }
+    : {
+        A1: "A1.mp3", C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3",
+        A2: "A2.mp3", C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3",
+        A3: "A3.mp3", C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3",
+        A4: "A4.mp3", C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3",
+        A5: "A5.mp3", C6: "C6.mp3",
+      };
+  const piano = keep(
+    new Tone.Sampler({
+      urls: pianoUrls,
+      baseUrl: "https://tonejs.github.io/audio/salamander/",
+      release: 1.1,
+      volume: -4,
+    })
+  ).connect(pianoHP);
+  piano.maxPolyphony = lite ? 6 : 16;
+  chan.piano.connect(verbSend);   // ポストフェーダー送り
+  chan.piano.connect(delaySend);
+
   // ライザーはstart/stopを使わない。先読みスケジューリングでは未来時刻の
   // start()がSourceの状態と矛盾して例外を投げるため、常時鳴らしてゲインで開閉する。
   const riserAmp = keep(new Tone.Gain(0)).connect(ch("fx", bus));
@@ -397,6 +426,7 @@ function buildAudio(lite) {
     master, meter, dcBlock, glue, bus, duck, verb, verbSend, delay, delaySend,
     kick, kickClick, kickGain, sub, hat, ohat, hatFilt, clap, clapFilt, perc,
     bass, acid, acidDist, stab, pad, padHP, padFilter, padChorus, padWidth, padGain,
+    piano, pianoHP,
     riser, riserFilt, riserAmp, recorder,
   };
 }
@@ -464,6 +494,17 @@ function genPatterns(mode, root, scaleName) {
       (i % 8 === 3 || i % 8 === 6) && chance(0.8) ? { n: root + 24 + deg(pick([0, 2, 4])), a: true } : null
     );
   }
+
+  // piano: 和音度を分散和音で辿る。stab(刻み)やpad(持続)と役割を分け、
+  // 8分グリッド上をアルペジオで動く。音高は再生時に現在の和音度から導く。
+  const pianoArp = mode === "MINIMAL" ? [0, 2, 4, 6, 4, 2] : [0, 2, 4, 2];
+  const pianoDens = mode === "MINIMAL" ? 0.62 : mode === "EDM" ? 0.5 : 0.42;
+  p.piano = Array.from({ length: 16 }, (_, i) => {
+    if (i % 2 !== 0) return null;               // 8分グリッド
+    if (!chance(pianoDens)) return null;
+    const d = pianoArp[((i / 2) | 0) % pianoArp.length];
+    return { d, oct: chance(0.18) ? 1 : 0, a: i % 8 === 0 };
+  });
 
   return p;
 }
@@ -729,6 +770,7 @@ export default function DeviationEngine() {
   const [vizBig, setVizBig] = useState(false);
   const [vizMode, setVizMode] = useState("clock");
   const [overlay, setOverlay] = useState("min");
+  const [grid, setGrid] = useState("off");
   const [vidRec, setVidRec] = useState(false);
   const [vidSecs, setVidSecs] = useState(0);
   const [vidFmt, setVidFmt] = useState("");
@@ -752,6 +794,7 @@ export default function DeviationEngine() {
   const vizModeRef = useRef("clock");
   const reducedMotionRef = useRef(false);
   const overlayRef = useRef("min");
+  const gridRef = useRef("off");
   const vidRef = useRef({ rec: null, chunks: [], dest: null, timer: null, mime: "" });
   const rafRef = useRef(null);
   const ctxSwapped = useRef(false);
@@ -775,6 +818,7 @@ export default function DeviationEngine() {
   useEffect(() => { spreadRef.current = spread; }, [spread]);
   useEffect(() => { venueRef.current = venue; }, [venue]);
   useEffect(() => { overlayRef.current = overlay; }, [overlay]);
+  useEffect(() => { gridRef.current = grid; }, [grid]);
   useEffect(() => {
     vizModeRef.current = vizMode;
     const V = vizRef.current;
@@ -1152,6 +1196,18 @@ export default function DeviationEngine() {
         R.stab.triggerAttackRelease(notes, g(1.6), time, v.a ? 0.55 : 0.32);
         emit("stab", v.a ? 0.8 : 0.5);
         e.hitFlash.stab = 1;
+      }
+    }
+    if (e.active.piano && R.piano && R.piano.loaded) {
+      const v = at("piano", i);
+      if (v) {
+        // 音高は現在の和音度から毎回導出する。和音が動けばピアノも追随する。
+        const dd = safeDeg(e.scaleName, e.chordDeg, v.d);
+        const n = e.root + 24 + degOf(e.scaleName, e.chordDeg + dd) + 12 * (v.oct || 0);
+        const stepDur = 60 / curBpmRef.current / 4;
+        R.piano.triggerAttackRelease(midiToNote(n), stepDur * 2.4, time, v.a ? 0.72 : 0.5);
+        emit("piano", v.a ? 0.85 : 0.55);
+        e.hitFlash.piano = 1;
       }
     }
 
@@ -1603,6 +1659,126 @@ export default function DeviationEngine() {
     }
   }
 
+  /* ---------- ステップ行列 / 16分グリッド オーバーレイ ----------
+     どのビジュアライザ・モードの上にも重ねられる。
+     "grid"  : 16分の縦グリッドと再生ヘッドだけを薄く重ねる。
+     "matrix": レイヤー×16ステップのシーケンサ行列を下部に重ねる。 */
+  function drawStepGrid(g, e, w, h, now) {
+    const mode = gridRef.current;
+    if (mode === "off" || !e || !e.pat) return;
+    const V = vizRef.current;
+    const cols = 16;
+    const frac = V.stepDur > 0 ? clamp((now - V.stepStart) / V.stepDur, 0, 1) : 0;
+    const head = ((V.step || 0) + frac) % cols;
+
+    g.save();
+    g.textAlign = "left";
+    g.textBaseline = "alphabetic";
+
+    if (mode === "grid") {
+      // 16分の縦線。拍(4分割ごと)は明るく。再生ヘッドは寒色の縦帯。
+      const mx = 12;
+      const x0 = mx, gw = w - mx * 2;
+      const cw = gw / cols;
+      for (let i = 0; i <= cols; i++) {
+        const x = x0 + i * cw;
+        const beat = i % 4 === 0;
+        g.strokeStyle = beat ? "rgba(237,230,214,0.22)" : "rgba(138,129,114,0.12)";
+        g.lineWidth = beat ? 1.4 : 0.8;
+        g.beginPath();
+        g.moveTo(x, 8);
+        g.lineTo(x, h - 8);
+        g.stroke();
+      }
+      const hx = x0 + head * cw;
+      g.fillStyle = "rgba(76,141,255,0.10)";
+      g.fillRect(hx, 8, cw, h - 16);
+      g.fillStyle = "rgba(76,141,255,0.85)";
+      g.fillRect(hx - 1, 8, 2, h - 16);
+      g.restore();
+      return;
+    }
+
+    // --- matrix ---
+    const marginX = 12, labelW = 48;
+    const gx0 = marginX + labelW;
+    const gw = w - gx0 - marginX;
+    const rows = LAYERS.length;
+    const rowH = clamp((h * 0.46) / rows, 7, 16);
+    const gh = rowH * rows;
+    const headH = 15;
+    const gy0 = h - gh - 14;
+    const cw = gw / cols;
+
+    // 背板
+    g.fillStyle = "rgba(14,12,10,0.62)";
+    g.fillRect(marginX - 6, gy0 - headH - 6, w - (marginX - 6) * 2, gh + headH + 12);
+    g.strokeStyle = "rgba(48,41,33,0.9)";
+    g.lineWidth = 1;
+    g.strokeRect(marginX - 6, gy0 - headH - 6, w - (marginX - 6) * 2, gh + headH + 12);
+
+    g.font = `600 10px ${MONO}`;
+    g.fillStyle = "rgba(138,129,114,0.9)";
+    g.fillText("STEP MATRIX / 16分", gx0, gy0 - 5);
+
+    // 拍の縦帯
+    for (let i = 0; i < cols; i++) {
+      if (i % 4 === 0) {
+        g.fillStyle = "rgba(237,230,214,0.04)";
+        g.fillRect(gx0 + i * cw, gy0, cw, gh);
+      }
+    }
+
+    const at = (l, idx) => {
+      const p = e.pat[l];
+      if (!p) return null;
+      const ph = e.phase[l] || 0;
+      return p[(idx + ph) % cols];
+    };
+
+    for (let r = 0; r < rows; r++) {
+      const l = LAYERS[r];
+      const y = gy0 + r * rowH;
+      const on = !!e.active[l];
+      const fl = V.flash[l];
+      const flAge = fl ? now - fl.t0 : 99;
+
+      // ラベル
+      g.font = `500 9px ${MONO}`;
+      g.fillStyle = on ? "rgba(237,230,214,0.85)" : "rgba(92,85,74,0.75)";
+      g.textAlign = "right";
+      g.fillText(LAYER_JP[l] || l, gx0 - 6, y + rowH - 2);
+      g.textAlign = "left";
+
+      for (let i = 0; i < cols; i++) {
+        const cx = gx0 + i * cw;
+        const hit = at(l, i);
+        if (hit) {
+          const acc = typeof hit === "object" ? hit.a : i % 4 === 0;
+          let alpha = on ? (acc ? 0.9 : 0.55) : 0.16;
+          // 直近に発音したレイヤーの現在ステップは瞬かせる
+          if (on && i === (V.step || 0) && flAge < 0.14) alpha = 1;
+          g.fillStyle = on
+            ? `rgba(240,162,2,${alpha})`
+            : `rgba(138,129,114,${alpha})`;
+          g.fillRect(cx + 1, y + 1, cw - 2, rowH - 2);
+        } else {
+          g.strokeStyle = "rgba(48,41,33,0.5)";
+          g.lineWidth = 0.5;
+          g.strokeRect(cx + 1, y + 1, cw - 2, rowH - 2);
+        }
+      }
+    }
+
+    // 再生ヘッド
+    const hx = gx0 + head * cw;
+    g.fillStyle = "rgba(76,141,255,0.12)";
+    g.fillRect(gx0 + Math.floor(head) * cw, gy0, cw, gh);
+    g.fillStyle = "rgba(76,141,255,0.9)";
+    g.fillRect(hx - 1, gy0 - 3, 2, gh + 6);
+    g.restore();
+  }
+
   /* ============================================================
      VISUALIZER — 極座標の小節時計
      1小節を円周に、レイヤーを同心円に割り当てる。反復すれば静止した
@@ -1818,6 +1994,7 @@ export default function DeviationEngine() {
     }
 
     drawOverlay(g, e, w, h);
+    drawStepGrid(g, e, w, h, now);
   }
 
   /* ============================================================
@@ -1977,6 +2154,7 @@ export default function DeviationEngine() {
     g.globalCompositeOperation = "source-over";
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOverlay(g, e, w, h);
+    drawStepGrid(g, e, w, h, now);
   }
 
   /* ============================================================
@@ -2152,6 +2330,7 @@ export default function DeviationEngine() {
 
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOverlay(g, e, w, h);
+    drawStepGrid(g, e, w, h, now);
   }
 
   /* ---------- scope ---------- */
@@ -2422,6 +2601,21 @@ export default function DeviationEngine() {
                   }}
                 >
                   {overlay === "off" ? "字幕OFF" : overlay === "min" ? "字幕" : "字幕+"}
+                </button>
+                <button
+                  onClick={() =>
+                    setGrid((gm) => (gm === "off" ? "grid" : gm === "grid" ? "matrix" : "off"))
+                  }
+                  title="ステップ行列 / 16分グリッド"
+                  style={{
+                    background: grid !== "off" ? C.panel2 : "transparent",
+                    border: `1px solid ${grid === "matrix" ? C.amber : grid === "grid" ? C.blue : C.line}`,
+                    color: grid === "matrix" ? C.amber : grid === "grid" ? C.blue : C.dimmer,
+                    padding: "5px 10px", fontFamily: MONO, fontSize: 10,
+                    letterSpacing: "0.1em", cursor: "pointer",
+                  }}
+                >
+                  {grid === "off" ? "格子OFF" : grid === "grid" ? "16分" : "行列"}
                 </button>
                 <button
                   onClick={vidRec ? stopVideo : startVideo}
