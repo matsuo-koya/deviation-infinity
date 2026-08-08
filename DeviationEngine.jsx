@@ -614,6 +614,23 @@ function nextSection(mode, prev) {
 /* ============================================================
    DEVIATION OPERATORS
    ============================================================ */
+// 予測の地盤を保証する。偏差が何をしても、キックの4つ打ち(0,4,8,12)と
+// 小節頭、サブの土台、そして両者の位相は常に元へ戻す。地盤が動くと
+// 一貫性を測る基準そのものが消え、偏差が偏差として聴こえなくなる。
+function enforceAnchors(E) {
+  E.phase.kick = 0;
+  if (E.pat.kick) {
+    E.pat.kick = E.pat.kick.slice();
+    for (let i = 0; i < 16; i += 4) E.pat.kick[i] = 1;   // 4つ打ちを再確約
+  }
+  E.phase.sub = 0;
+  if (E.pat.sub) {
+    E.pat.sub = E.pat.sub.slice();
+    E.pat.sub[0] = 1;   // 小節頭
+    E.pat.sub[8] = 1;   // 半小節
+  }
+}
+
 function applyDeviation(E) {
   const drumLayers = ["hat", "perc", "ohat", "clap", "snare", "kick"].filter((l) => E.active[l]);
   const toneLayers = ["bass", "acid", "stab"].filter((l) => E.active[l]);
@@ -627,19 +644,25 @@ function applyDeviation(E) {
   const w = (name, weight, fn) => ops.push({ name, weight, fn });
 
   w("ROTATE", 3, () => {
-    const l = pick(all);
+    // キックは回転させない。小節頭がずれると地盤が動いてしまう。
+    const l = pick(all.filter((x) => x !== "kick"));
+    if (!l) return null;
     E.pat[l] = rotate(E.pat[l], chance(0.5) ? 1 : -1);
     return `${LAYER_JP[l]} を1ステップ回転`;
   });
   w("FLIP", 3, () => {
     const l = pick(drumLayers.length ? drumLayers : all);
-    const i = (Math.random() * 16) | 0;
+    let i = (Math.random() * 16) | 0;
+    // キックの4つ打ち(0,4,8,12)は反転で消さない。裏拍側だけを対象にする。
+    if (l === "kick" && i % 4 === 0) i = (i + 1 + ((Math.random() * 3) | 0)) % 16;
     E.pat[l] = E.pat[l].slice();
     E.pat[l][i] = E.pat[l][i] ? 0 : 1;
     return `${LAYER_JP[l]} step ${i} を反転`;
   });
   w("PHASE", E.mode === "MINIMAL" ? 5 : 1, () => {
-    const l = pick(["perc", "stab", "hat"].filter((x) => E.active[x])) || pick(all);
+    // キックは位相ずらしの対象外。地盤の頭を固定する。
+    const l = pick(["perc", "stab", "hat"].filter((x) => E.active[x])) || pick(all.filter((x) => x !== "kick"));
+    if (!l) return null;
     E.phase[l] = (E.phase[l] || 0) + 1;
     E.process = "PHASING";
     return `${LAYER_JP[l]} を位相ずらし (+${E.phase[l]})`;
@@ -661,7 +684,9 @@ function applyDeviation(E) {
   });
   w("SUBTRACT", 2, () => {
     const l = pick(all);
-    const full = E.pat[l].map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
+    let full = E.pat[l].map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
+    // キックの4つ打ちは削除対象から外す。裏拍のゴーストだけ間引ける。
+    if (l === "kick") full = full.filter((i) => i % 4 !== 0);
     if (full.length < 3) return null;
     const i = pick(full);
     E.pat[l] = E.pat[l].slice();
@@ -669,7 +694,9 @@ function applyDeviation(E) {
     return `${LAYER_JP[l]} から音を削除 (step ${i})`;
   });
   w("EUCLID", 2, () => {
-    const l = pick(["perc", "hat", "ohat", "snare"].filter((x) => E.active[x])) || pick(drumLayers);
+    // キックは E(k,16) で作り直さない。4つ打ちの地盤を壊さないため。
+    const pool = ["perc", "hat", "ohat", "snare"].filter((x) => E.active[x]);
+    const l = pool.length ? pick(pool) : pick(drumLayers.filter((x) => x !== "kick"));
     if (!l) return null;
     const k = pick([3, 5, 7, 9, 11]);
     E.pat[l] = rotate(euclid(k, 16), (Math.random() * 4) | 0);
@@ -739,6 +766,7 @@ function applyDeviation(E) {
     r -= o.weight;
     if (r <= 0) {
       const text = o.fn();
+      enforceAnchors(E);   // 何が起きても地盤は元へ戻す
       return text ? { op: o.name, text } : null;
     }
   }
