@@ -1038,7 +1038,15 @@ export default function DeviationEngine() {
       // スタッターの残り小節
       if (e.fx.stutterLeft > 0) {
         e.fx.stutterLeft--;
-        if (e.fx.stutterLeft === 0) R.stutterGain.gain.setValueAtTime(1, time + 0.001);
+        if (e.fx.stutterLeft === 0) {
+          // 終了時の復帰。barTickは直前のstep15で積んだスタッター予約の後に走るため、
+          // step15の「閉じる」勾配(最大~1step後)が復帰を上書きして0.015で固着し、
+          // 以後stutterLeft=0でstepTickが触れず永久に無音化していた。
+          // 未来の閉じ予約をすべて取り消してから、確実に開き直す。
+          const sg = R.stutterGain.gain;
+          sg.cancelScheduledValues(time + 0.0005);
+          sg.setValueAtTime(1, time + 0.02);
+        }
       }
     }
 
