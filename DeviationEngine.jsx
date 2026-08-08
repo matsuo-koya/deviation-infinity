@@ -329,7 +329,7 @@ function buildAudio(lite) {
       filterEnvelope: { attack: 0.002, decay: 0.05, sustain: 1, release: 0.05, baseFrequency: 4000, octaves: 0 },
     })
   ).connect(bassFilt);
-  bass.portamento = 0.055;
+  bass.portamento = 0.02;   // キックと噛ませるため短め。長いとダウンビートが滑って遅れて聴こえる
 
   const acidDist = keep(new Tone.Distortion({ distortion: 0.32, wet: 0.5 })).connect(
     keep(new Tone.Limiter(-10)).connect(ch("acid", duck))
@@ -340,7 +340,7 @@ function buildAudio(lite) {
     envelope: { attack: 0.003, decay: 0.18, sustain: 0.15, release: 0.08 },
     filterEnvelope: { attack: 0.004, decay: 0.2, sustain: 0.08, release: 0.1, baseFrequency: 220, octaves: 4 },
   })).connect(acidDist);
-  acid.portamento = 0.055;        // スライドはレガートの重なりで起こす
+  acid.portamento = 0.02;         // 短め。スライド感はレガートの重なりで作り、頭は詰める
   chan.acid.connect(delaySend);   // ポストフェーダー送り
 
   const stab = keep(
@@ -827,7 +827,7 @@ export default function DeviationEngine() {
   const [mutes, setMutes] = useState({});
   const [showMixer, setShowMixer] = useState(false);
   const [spread, setSpread] = useState(14);   // キック基音からベース音域上端までの半音数
-  const [b303, setB303] = useState({ cut: 190, res: 5.5, env: 0.55, dec: 0.22, acc: 0.6, glide: 0.055 });
+  const [b303, setB303] = useState({ cut: 190, res: 5.5, env: 0.55, dec: 0.22, acc: 0.6, glide: 0.02 });
   const [show303, setShow303] = useState(false);
   const [venue, setVenue] = useState({ room: 0.14, drive: 0.35, flange: 0, autoFlange: true, autoStutter: true });
   const [showVenue, setShowVenue] = useState(false);
@@ -876,7 +876,7 @@ export default function DeviationEngine() {
   const appetiteRef = useRef(1.0);
   const liteRef = useRef(false);
   const spreadRef = useRef(14);
-  const b303Ref = useRef({ cut: 190, res: 5.5, env: 0.55, dec: 0.22, acc: 0.6, glide: 0.055 });
+  const b303Ref = useRef({ cut: 190, res: 5.5, env: 0.55, dec: 0.22, acc: 0.6, glide: 0.02 });
   const venueRef = useRef({ room: 0.14, drive: 0.35, flange: 0, autoFlange: true, autoStutter: true });
 
   useEffect(() => { spreadRef.current = spread; }, [spread]);
@@ -2849,7 +2849,7 @@ export default function DeviationEngine() {
                       onChange={(v) => setB303((p2) => ({ ...p2, dec: v }))} fmt={(v) => `${Math.round(v * 1000)} ms`} />
                     <Slider lab="Accent" val={b303.acc} min={0} max={1} step={0.01}
                       onChange={(v) => setB303((p2) => ({ ...p2, acc: v }))} fmt={(v) => v.toFixed(2)} />
-                    <Slider lab="Glide" val={b303.glide} min={0.01} max={0.16} step={0.005}
+                    <Slider lab="Glide" val={b303.glide} min={0} max={0.16} step={0.005}
                       onChange={(v) => setB303((p2) => ({ ...p2, glide: v }))} fmt={(v) => `${Math.round(v * 1000)} ms`} />
                   </div>
                   <div style={{ fontSize: 10, color: C.dimmer, lineHeight: 1.7, marginTop: 2 }}>
