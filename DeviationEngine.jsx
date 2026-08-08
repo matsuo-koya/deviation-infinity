@@ -48,7 +48,8 @@ const DEFAULT_LEVELS = {
   kick: dbToGain(0.7),    // +0.7 dB
   sub: 0.26,
   snare: dbToGain(-5.8),  // -5.8 dB
-  clap: 0.34, hat: 0.24, ohat: 0.16,
+  clap: dbToGain(-2.5),   // -2.5 dB
+  hat: 0.24, ohat: 0.16,
   perc: 0.15,
   bass: dbToGain(-14.9),  // -14.9 dB
   acid: dbToGain(-18.4),  // -18.4 dB
