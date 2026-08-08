@@ -461,13 +461,21 @@ function genPatterns(mode, root, scaleName) {
 
   p.sub = Array.from({ length: 16 }, (_, i) => (i % 8 === 0 ? 1 : 0));
 
-  // bass: offbeat-leaning, root/fifth/flat-seven
-  // BASSもACIDと同じく、和音度からの相対音度で保持する。
-  // 主音固定にすると和音が動いたとき土台だけが取り残される。
+  // bass: キック/サブと連動した上で遊ぶ。生のドラム&ベースの噛み合いに倣い、
+  // まずキック拍(特に小節頭)に乗って土台をロックし、8分裏で遊ぶ。
+  // 音度は和音度からの相対で保つ(主音固定にすると和音が動いたとき取り残される)。
+  // bassDegはキック拍に根音、裏拍に5th/3rd/7thが来るよう配置してある。
   const bassDeg = [0, 0, 0, 4, 0, 2, 0, 6];
   p.bass = Array.from({ length: 16 }, (_, i) => {
-    const on = mode === "MINIMAL" ? i % 4 === 2 : i % 4 === 2 || (i % 4 === 0 && chance(0.2));
-    return on ? { d: bassDeg[(i / 2) | 0] ?? 0, a: chance(0.3), s: chance(0.26) } : null;
+    const kickBeat = i % 4 === 0;   // キックと同じ拍 (0,4,8,12)
+    const off = i % 4 === 2;        // 8分裏 — 遊びの場
+    let on;
+    if (i === 0) on = true;                                          // 小節頭は必ずロック
+    else if (kickBeat) on = chance(mode === "MINIMAL" ? 0.5 : 0.7);  // 他のキック拍にも高確率で連動
+    else if (off) on = chance(mode === "MINIMAL" ? 0.5 : 0.85);      // 裏で遊ぶ
+    else on = chance(0.1);                                           // 16分の経過音は稀に
+    if (!on) return null;
+    return { d: bassDeg[(i / 2) | 0] ?? 0, a: kickBeat ? chance(0.55) : chance(0.3), s: chance(0.26) };
   });
 
   // acid: 和音度からの相対音度で保持する。和音が動けば追随する。
@@ -628,6 +636,13 @@ function enforceAnchors(E) {
     E.pat.sub = E.pat.sub.slice();
     E.pat.sub[0] = 1;   // 小節頭
     E.pat.sub[8] = 1;   // 半小節
+  }
+  // ベースは小節頭でキック/サブと連動(根音)。遊びは残し、頭のロックだけ確約する。
+  E.phase.bass = 0;
+  if (E.pat.bass) {
+    E.pat.bass = E.pat.bass.slice();
+    const b0 = E.pat.bass[0];
+    E.pat.bass[0] = b0 && typeof b0 === "object" ? { ...b0, d: 0 } : { d: 0, a: true, s: false };
   }
 }
 
@@ -1123,7 +1138,10 @@ export default function DeviationEngine() {
       e.hitFlash.kick = 1;
     }
     if (e.active.sub && at("sub", i)) {
-      R.sub.triggerAttackRelease(midiToNote(foldToWindow(e.root, e.root - 9, e.root + 3)), "8n", time, 0.6);
+      // サブは現在の和音の根音に追随する。ベースの小節頭ロックと同じ音名なので、
+      // キック・サブ・ベースが同じ土台を共有し、和音が動けば一緒に動く。
+      const subRoot = e.root + degOf(e.scaleName, e.chordDeg);
+      R.sub.triggerAttackRelease(midiToNote(foldToWindow(subRoot, e.root - 9, e.root + 3)), "8n", time, 0.6);
       emit("sub", 0.6);
       e.hitFlash.sub = 1;
     }
