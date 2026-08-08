@@ -45,7 +45,7 @@ const MIX = [...LAYERS, "fx"];
 const DEFAULT_LEVELS = {
   kick: 0.90, sub: 0.26, snare: 0.30, clap: 0.34, hat: 0.24, ohat: 0.16,
   perc: 0.15, bass: 0.26, acid: 0.20, stab: 0.16, pad: 0.15,
-  piano: 0.24,
+  piano: 0.40,
   fx: 0.10,
 };
 const LAYER_JP = {
@@ -395,7 +395,7 @@ function buildAudio(lite) {
       urls: pianoUrls,
       baseUrl: "https://tonejs.github.io/audio/salamander/",
       release: 1.1,
-      volume: -4,
+      volume: -1,
     })
   ).connect(pianoHP);
   piano.maxPolyphony = lite ? 6 : 16;
