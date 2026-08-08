@@ -1700,11 +1700,11 @@ export default function DeviationEngine() {
     }
 
     // --- matrix ---
-    const marginX = 12, labelW = 48;
+    const marginX = 12, labelW = 56;
     const gx0 = marginX + labelW;
     const gw = w - gx0 - marginX;
     const rows = LAYERS.length;
-    const rowH = clamp((h * 0.46) / rows, 7, 16);
+    const rowH = clamp((h * 0.5) / rows, 11, 20);
     const gh = rowH * rows;
     const headH = 15;
     const gy0 = h - gh - 14;
@@ -1743,11 +1743,11 @@ export default function DeviationEngine() {
       const fl = V.flash[l];
       const flAge = fl ? now - fl.t0 : 99;
 
-      // ラベル
-      g.font = `500 9px ${MONO}`;
-      g.fillStyle = on ? "rgba(237,230,214,0.85)" : "rgba(92,85,74,0.75)";
+      // レイヤー名（KICK / SUB / …）。非アクティブでも読めるようにする。
+      g.font = `${on ? 700 : 500} 10px ${MONO}`;
+      g.fillStyle = on ? "rgba(240,162,2,0.95)" : "rgba(150,140,124,0.8)";
       g.textAlign = "right";
-      g.fillText(LAYER_JP[l] || l, gx0 - 6, y + rowH - 2);
+      g.fillText(LAYER_JP[l] || l, gx0 - 7, y + rowH / 2 + 3.5);
       g.textAlign = "left";
 
       for (let i = 0; i < cols; i++) {
@@ -2604,7 +2604,7 @@ export default function DeviationEngine() {
                 </button>
                 <button
                   onClick={() =>
-                    setGrid((gm) => (gm === "off" ? "grid" : gm === "grid" ? "matrix" : "off"))
+                    setGrid((gm) => (gm === "off" ? "matrix" : gm === "matrix" ? "grid" : "off"))
                   }
                   title="ステップ行列 / 16分グリッド"
                   style={{
