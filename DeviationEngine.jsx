@@ -444,14 +444,20 @@ function genPatterns(mode, root, scaleName) {
     p.kick = euclid(4, 16).map((v, i) => (i % 4 === 0 ? 1 : 0));
     p.hat = rotate(euclid(pick([5, 7, 9]), 16), 0);
     p.ohat = euclid(2, 16);
-    p.clap = euclid(2, 16);
+    // クラップはバックビート(2・4拍=step4,12)。裏には行かず、たまに表拍(0/8)のゴースト。
+    p.clap = Array.from({ length: 16 }, (_, i) =>
+      i === 4 || i === 12 ? 1 : (i === 0 || i === 8) && chance(0.1) ? 1 : 0
+    );
     p.perc = euclid(pick([3, 5, 7]), 16);
     p.snare = Array.from({ length: 16 }, (_, i) => (i === 12 ? 1 : 0));
   } else {
     p.kick = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0];
     p.hat = Array.from({ length: 16 }, (_, i) => (i % 2 === 1 ? 1 : chance(0.15) ? 1 : 0));
     p.ohat = Array.from({ length: 16 }, (_, i) => (i % 8 === 6 ? 1 : 0));
-    p.clap = Array.from({ length: 16 }, (_, i) => (i === 4 || i === 12 ? 1 : 0));
+    // クラップはバックビート(2・4拍=step4,12)。裏には行かず、たまに表拍(0/8)のゴースト。
+    p.clap = Array.from({ length: 16 }, (_, i) =>
+      i === 4 || i === 12 ? 1 : (i === 0 || i === 8) && chance(0.12) ? 1 : 0
+    );
     p.perc = euclid(pick([3, 5, 7]), 16);
     // スネアは裏拍を担当し、たまにゴーストノートを置く
     p.snare = Array.from({ length: 16 }, (_, i) =>
@@ -637,6 +643,15 @@ function enforceAnchors(E) {
     E.pat.sub[0] = 1;   // 小節頭
     E.pat.sub[8] = 1;   // 半小節
   }
+  // クラップはバックビート(4,12)を維持し、裏拍(8分裏・16分)には出さない。
+  // 表拍(0/8)のゴーストだけは許す。位相もずらさない。
+  E.phase.clap = 0;
+  if (E.pat.clap) {
+    E.pat.clap = E.pat.clap.slice();
+    for (let i = 0; i < 16; i++) if (i % 4 !== 0) E.pat.clap[i] = 0;
+    E.pat.clap[4] = 1;
+    E.pat.clap[12] = 1;
+  }
   // ベースは小節頭でキック/サブと連動(根音)。遊びは残し、頭のロックだけ確約する。
   E.phase.bass = 0;
   if (E.pat.bass) {
@@ -659,8 +674,8 @@ function applyDeviation(E) {
   const w = (name, weight, fn) => ops.push({ name, weight, fn });
 
   w("ROTATE", 3, () => {
-    // キックは回転させない。小節頭がずれると地盤が動いてしまう。
-    const l = pick(all.filter((x) => x !== "kick"));
+    // キック/クラップは回転させない。小節頭やバックビートがずれて地盤が動く。
+    const l = pick(all.filter((x) => x !== "kick" && x !== "clap"));
     if (!l) return null;
     E.pat[l] = rotate(E.pat[l], chance(0.5) ? 1 : -1);
     return `${LAYER_JP[l]} を1ステップ回転`;
@@ -670,6 +685,8 @@ function applyDeviation(E) {
     let i = (Math.random() * 16) | 0;
     // キックの4つ打ち(0,4,8,12)は反転で消さない。裏拍側だけを対象にする。
     if (l === "kick" && i % 4 === 0) i = (i + 1 + ((Math.random() * 3) | 0)) % 16;
+    // クラップは裏に出さない。表拍(0/8)のゴーストだけを増減させる。
+    if (l === "clap") i = pick([0, 8]);
     E.pat[l] = E.pat[l].slice();
     E.pat[l][i] = E.pat[l][i] ? 0 : 1;
     return `${LAYER_JP[l]} step ${i} を反転`;
@@ -683,7 +700,9 @@ function applyDeviation(E) {
     return `${LAYER_JP[l]} を位相ずらし (+${E.phase[l]})`;
   });
   w("ADD", E.mode === "MINIMAL" ? 4 : 2, () => {
-    const l = pick(toneLayers.length ? toneLayers : all);
+    // クラップは裏拍への追加を避けるため対象から外す(バックビート固定)。
+    const l = pick(toneLayers.length ? toneLayers : all.filter((x) => x !== "clap"));
+    if (!l) return null;
     const empty = E.pat[l].map((v, i) => (v ? -1 : i)).filter((i) => i >= 0);
     if (!empty.length) return null;
     const i = pick(empty);
@@ -702,6 +721,8 @@ function applyDeviation(E) {
     let full = E.pat[l].map((v, i) => (v ? i : -1)).filter((i) => i >= 0);
     // キックの4つ打ちは削除対象から外す。裏拍のゴーストだけ間引ける。
     if (l === "kick") full = full.filter((i) => i % 4 !== 0);
+    // クラップのバックビート(4,12)は削除しない。
+    if (l === "clap") full = full.filter((i) => i !== 4 && i !== 12);
     if (full.length < 3) return null;
     const i = pick(full);
     E.pat[l] = E.pat[l].slice();
@@ -711,7 +732,7 @@ function applyDeviation(E) {
   w("EUCLID", 2, () => {
     // キックは E(k,16) で作り直さない。4つ打ちの地盤を壊さないため。
     const pool = ["perc", "hat", "ohat", "snare"].filter((x) => E.active[x]);
-    const l = pool.length ? pick(pool) : pick(drumLayers.filter((x) => x !== "kick"));
+    const l = pool.length ? pick(pool) : pick(drumLayers.filter((x) => x !== "kick" && x !== "clap"));
     if (!l) return null;
     const k = pick([3, 5, 7, 9, 11]);
     E.pat[l] = rotate(euclid(k, 16), (Math.random() * 4) | 0);
