@@ -41,11 +41,19 @@ const LAYERS = ["kick", "sub", "snare", "clap", "hat", "ohat", "perc", "bass", "
 // ミキサーが持つチャンネル。演奏レイヤーに加えてFX(ライザー)も含む。
 const MIX = [...LAYERS, "fx"];
 
-// チャンネルの初期音量（線形）。低域が重なるsub/bass/acidは控えめに置く。
+// チャンネルの初期音量（線形）。ミキサーの dB 表示は 20*log10(gain) なので、
+// dB 指定の規定値は dbToGain(dB) で線形に直す。低域が重なるbass/acidは控えめ。
+const dbToGain = (db) => Math.pow(10, db / 20);
 const DEFAULT_LEVELS = {
-  kick: 0.90, sub: 0.26, snare: 0.30, clap: 0.34, hat: 0.24, ohat: 0.16,
-  perc: 0.15, bass: 0.26, acid: 0.20, stab: 0.16, pad: 0.15,
-  piano: 0.40,
+  kick: dbToGain(0.7),    // +0.7 dB
+  sub: 0.26,
+  snare: dbToGain(-5.8),  // -5.8 dB
+  clap: 0.34, hat: 0.24, ohat: 0.16,
+  perc: 0.15,
+  bass: dbToGain(-14.9),  // -14.9 dB
+  acid: dbToGain(-18.4),  // -18.4 dB
+  stab: 0.16, pad: 0.15,
+  piano: dbToGain(-1.1),  // -1.1 dB
   fx: 0.10,
 };
 const LAYER_JP = {
