@@ -52,7 +52,7 @@ const DEFAULT_LEVELS = {
   hat: 0.24, ohat: 0.16,
   perc: 0.15,
   bass: dbToGain(-14.9),  // -14.9 dB
-  acid: dbToGain(-18.4),  // -18.4 dB
+  acid: dbToGain(-20.0),  // -20.0 dB（味付け程度。表に出過ぎない）
   stab: 0.16, pad: 0.15,
   piano: dbToGain(-1.1),  // -1.1 dB
   fx: 0.10,
