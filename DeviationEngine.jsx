@@ -634,6 +634,38 @@ function nextSection(mode, prev) {
   return { type: t, len: map[t][0], target: map[t][1], left: map[t][0] };
 }
 
+/* ---------- おまかせ ----------
+   音の展開(セクション種別・エネルギー帯)と、偏差の蓄積量から、
+   ビジュアライザ / グリッド / 解説オーバーレイを自動で選ぶ。
+   偏差が溜まるほど「era」が進み、同じ区間でも表情が展開していく。
+   返す key が変わったときだけ切り替える(毎フレームの再設定を避ける)。 */
+function autoPlan(e) {
+  const s = e.section.type;
+  const en = e.energy;
+  const band = en > 0.66 ? "hi" : en > 0.4 ? "mid" : "lo";
+  const era = Math.floor((e.devCount || 0) / 8);   // 偏差の蓄積で展開
+  const alt = era % 2 === 1;
+  let viz, grid, overlay;
+  if (s === "drop" || s === "peak" || s === "dense") {
+    // 最高潮 — 溶けるアシッド。画面は邪魔しない。偏差が溜まれば鏡面へ振る。
+    viz = alt ? "chrome" : "acid"; grid = "off"; overlay = "off";
+  } else if (s === "build") {
+    // 盛り上げ — 緊張の鏡面。グリッドで構造の充填を見せる。
+    viz = alt ? "acid" : "chrome"; grid = "matrix"; overlay = "min";
+  } else if (s === "intro" || s === "thin" || s === "strip" || s === "break") {
+    // 静かな区間 — 時計で落ち着かせ、解説とステップ行列を出す。
+    viz = "clock"; grid = "matrix"; overlay = "full";
+  } else if (s === "tunnel") {
+    viz = band === "hi" ? "acid" : "chrome"; grid = "off"; overlay = "min";
+  } else {
+    // groove / process / sustain — 巡航。エネルギーと偏差で表情を変える。
+    viz = band === "hi" ? (alt ? "acid" : "chrome") : "clock";
+    grid = band === "lo" ? "grid" : "off";
+    overlay = "min";
+  }
+  return { viz, grid, overlay, key: `${s}:${band}:${era}` };
+}
+
 /* ============================================================
    DEVIATION OPERATORS
    ============================================================ */
@@ -844,6 +876,7 @@ export default function DeviationEngine() {
   const [vizMode, setVizMode] = useState("clock");
   const [overlay, setOverlay] = useState("min");
   const [grid, setGrid] = useState("off");
+  const [auto, setAuto] = useState(false);   // おまかせ: viz/grid/解説を展開に合わせて自動切替
   const [vidRec, setVidRec] = useState(false);
   const [vidSecs, setVidSecs] = useState(0);
   const [vidFmt, setVidFmt] = useState("");
@@ -868,6 +901,8 @@ export default function DeviationEngine() {
   const reducedMotionRef = useRef(false);
   const overlayRef = useRef("min");
   const gridRef = useRef("off");
+  const autoRef = useRef(false);
+  const autoKeyRef = useRef("");   // おまかせの現在割当キー。変化時だけ切り替える
   const vidRef = useRef({ rec: null, chunks: [], dest: null, timer: null, mime: "" });
   const rafRef = useRef(null);
   const ctxSwapped = useRef(false);
@@ -892,6 +927,8 @@ export default function DeviationEngine() {
   useEffect(() => { venueRef.current = venue; }, [venue]);
   useEffect(() => { overlayRef.current = overlay; }, [overlay]);
   useEffect(() => { gridRef.current = grid; }, [grid]);
+  // おまかせON時はキーをリセットし、次tickで即座に現在の展開へ割り当て直す。
+  useEffect(() => { autoRef.current = auto; if (auto) autoKeyRef.current = ""; }, [auto]);
   useEffect(() => {
     vizModeRef.current = vizMode;
     const V = vizRef.current;
@@ -1648,6 +1685,17 @@ export default function DeviationEngine() {
       if (!e) {
         setUi((p) => (p ? { ...p, diag: diagRef.current } : p));
         return;
+      }
+      // おまかせ: 展開(セクション/エネルギー/偏差の蓄積)に合わせて自動切替。
+      // keyが変わったときだけ設定するので再レンダは区間の変わり目のみ。
+      if (autoRef.current) {
+        const plan = autoPlan(e);
+        if (plan.key !== autoKeyRef.current) {
+          autoKeyRef.current = plan.key;
+          if (plan.viz !== vizModeRef.current) setVizMode(plan.viz);
+          if (plan.grid !== gridRef.current) setGrid(plan.grid);
+          if (plan.overlay !== overlayRef.current) setOverlay(plan.overlay);
+        }
       }
       // 表示はオーディオ時刻の状態を使う。スケジュール時刻だと先行してしまう。
       const V = vizRef.current;
@@ -2653,13 +2701,26 @@ export default function DeviationEngine() {
             <div style={{ ...panel, padding: 0, marginBottom: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 14px", borderBottom: `1px solid ${C.line}` }}>
                 <span style={label}>
-                  {vizMode === "acid" ? "溶解 / acid feedback" : vizMode === "chrome" ? "鏡面 / specular surface" : "小節時計 / polar bar clock"}
+                  {auto ? "おまかせ · " : ""}{vizMode === "acid" ? "溶解 / acid feedback" : vizMode === "chrome" ? "鏡面 / specular surface" : "小節時計 / polar bar clock"}
                 </span>
                 <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  onClick={() => setAuto((a) => !a)}
+                  title="おまかせ — 展開に合わせて自動で切り替え"
+                  style={{
+                    background: auto ? C.amber : "transparent",
+                    border: `1px solid ${auto ? C.amber : C.line}`,
+                    color: auto ? C.bg : C.dim,
+                    padding: "5px 10px", fontFamily: MONO, fontSize: 10,
+                    letterSpacing: "0.1em", cursor: "pointer",
+                  }}
+                >
+                  おまかせ
+                </button>
                 {[["clock", "時計"], ["acid", "アシッド"], ["chrome", "鏡面"]].map(([k, lbl]) => (
                   <button
                     key={k}
-                    onClick={() => setVizMode(k)}
+                    onClick={() => { setAuto(false); setVizMode(k); }}
                     style={{
                       background: vizMode === k ? C.panel2 : "transparent",
                       border: `1px solid ${vizMode === k ? C.amber : C.line}`,
@@ -2672,9 +2733,10 @@ export default function DeviationEngine() {
                   </button>
                 ))}
                 <button
-                  onClick={() =>
-                    setOverlay((o) => (o === "off" ? "min" : o === "min" ? "full" : "off"))
-                  }
+                  onClick={() => {
+                    setAuto(false);
+                    setOverlay((o) => (o === "off" ? "min" : o === "min" ? "full" : "off"));
+                  }}
                   title="テキストオーバーレイ"
                   style={{
                     background: overlay !== "off" ? C.panel2 : "transparent",
@@ -2687,9 +2749,10 @@ export default function DeviationEngine() {
                   {overlay === "off" ? "字幕OFF" : overlay === "min" ? "字幕" : "字幕+"}
                 </button>
                 <button
-                  onClick={() =>
-                    setGrid((gm) => (gm === "off" ? "matrix" : gm === "matrix" ? "grid" : "off"))
-                  }
+                  onClick={() => {
+                    setAuto(false);
+                    setGrid((gm) => (gm === "off" ? "matrix" : gm === "matrix" ? "grid" : "off"));
+                  }}
                   title="ステップ行列 / 16分グリッド"
                   style={{
                     background: grid !== "off" ? C.panel2 : "transparent",
