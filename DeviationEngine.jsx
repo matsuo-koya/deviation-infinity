@@ -1848,8 +1848,10 @@ export default function DeviationEngine() {
     const gx0 = marginX + labelW;
     const gw = w - gx0 - marginX;
     const rows = LAYERS.length;
-    const rowH = clamp((h * 0.5) / rows, 11, 20);
-    const gh = rowH * rows;
+    // BASS行はピアノロールにして音高の変化を見せるため、3行ぶんの高さを取る
+    const baseH = clamp((h * 0.5) / (rows + 2), 11, 20);
+    const rowHFor = (ln) => (ln === "bass" ? baseH * 3 : baseH);
+    const gh = LAYERS.reduce((s, ln) => s + rowHFor(ln), 0);
     const headH = 15;
     const gy0 = h - gh - 14;
     const cw = gw / cols;
@@ -1880,9 +1882,12 @@ export default function DeviationEngine() {
       return p[(idx + ph) % cols];
     };
 
+    let ry = gy0;
     for (let r = 0; r < rows; r++) {
       const l = LAYERS[r];
-      const y = gy0 + r * rowH;
+      const rh = rowHFor(l);
+      const y = ry;
+      ry += rh;
       const on = !!e.active[l];
       const fl = V.flash[l];
       const flAge = fl ? now - fl.t0 : 99;
@@ -1891,25 +1896,74 @@ export default function DeviationEngine() {
       g.font = `${on ? 700 : 500} 10px ${MONO}`;
       g.fillStyle = on ? "rgba(240,162,2,0.95)" : "rgba(150,140,124,0.8)";
       g.textAlign = "right";
-      g.fillText(LAYER_JP[l] || l, gx0 - 7, y + rowH / 2 + 3.5);
+      g.fillText(LAYER_JP[l] || l, gx0 - 7, y + rh / 2 + 3.5);
       g.textAlign = "left";
 
-      for (let i = 0; i < cols; i++) {
-        const cx = gx0 + i * cw;
-        const hit = at(l, i);
-        if (hit) {
-          const acc = typeof hit === "object" ? hit.a : i % 4 === 0;
-          let alpha = on ? (acc ? 0.9 : 0.55) : 0.16;
-          // 直近に発音したレイヤーの現在ステップは瞬かせる
+      if (l === "bass") {
+        // --- BASSはピアノロール。発音時と同じ式で音高を導出し、音域窓の
+        //     中の高さに置く。和音が動けばロールも動き、スライドは線で示す。
+        const low = e.root + 3;                    // = kick基音 + 12（音域窓の下端）
+        const span = Math.max(1, spreadRef.current);
+        const noteH = Math.max(3, ((rh - 4) / span) * 1.6);
+        const pitchY = (n) => y + 2 + (1 - clamp((n - low) / span, 0, 1)) * (rh - 4 - noteH);
+        const noteAt = (i) => {
+          const v = at("bass", i);
+          if (!v) return null;
+          const bd = safeDeg(e.scaleName, e.chordDeg, v.d);
+          const raw = e.root + 12 + degOf(e.scaleName, e.chordDeg + bd);
+          return { v, n: foldToWindow(raw, low, low + span) };
+        };
+        // ロールの枠と、現在の和音の根音線（薄いアンバー）
+        g.strokeStyle = "rgba(48,41,33,0.8)";
+        g.lineWidth = 0.5;
+        g.strokeRect(gx0, y + 1, gw, rh - 2);
+        const rootN = foldToWindow(e.root + 12 + degOf(e.scaleName, e.chordDeg), low, low + span);
+        const rly = pitchY(rootN) + noteH / 2;
+        g.strokeStyle = "rgba(240,162,2,0.2)";
+        g.beginPath();
+        g.moveTo(gx0, rly);
+        g.lineTo(gx0 + gw, rly);
+        g.stroke();
+        for (let i = 0; i < cols; i++) {
+          const cur = noteAt(i);
+          if (!cur) continue;
+          const cx = gx0 + i * cw;
+          const ny = pitchY(cur.n);
+          let alpha = on ? (cur.v.a ? 0.95 : 0.6) : 0.18;
           if (on && i === (V.step || 0) && flAge < 0.14) alpha = 1;
-          g.fillStyle = on
-            ? `rgba(240,162,2,${alpha})`
-            : `rgba(138,129,114,${alpha})`;
-          g.fillRect(cx + 1, y + 1, cw - 2, rowH - 2);
-        } else {
-          g.strokeStyle = "rgba(48,41,33,0.5)";
-          g.lineWidth = 0.5;
-          g.strokeRect(cx + 1, y + 1, cw - 2, rowH - 2);
+          g.fillStyle = on ? `rgba(240,162,2,${alpha})` : `rgba(138,129,114,${alpha})`;
+          g.fillRect(cx + 1, ny, cw - 2, noteH);
+          // スライドは直前ステップの音から当ステップへ滑り込む線（青）
+          if (cur.v.s && i > 0) {
+            const prev = noteAt(i - 1);
+            if (prev) {
+              g.strokeStyle = on ? "rgba(76,141,255,0.6)" : "rgba(76,141,255,0.2)";
+              g.lineWidth = 1.2;
+              g.beginPath();
+              g.moveTo(cx - cw * 0.5, pitchY(prev.n) + noteH / 2);
+              g.lineTo(cx + 1, ny + noteH / 2);
+              g.stroke();
+            }
+          }
+        }
+      } else {
+        for (let i = 0; i < cols; i++) {
+          const cx = gx0 + i * cw;
+          const hit = at(l, i);
+          if (hit) {
+            const acc = typeof hit === "object" ? hit.a : i % 4 === 0;
+            let alpha = on ? (acc ? 0.9 : 0.55) : 0.16;
+            // 直近に発音したレイヤーの現在ステップは瞬かせる
+            if (on && i === (V.step || 0) && flAge < 0.14) alpha = 1;
+            g.fillStyle = on
+              ? `rgba(240,162,2,${alpha})`
+              : `rgba(138,129,114,${alpha})`;
+            g.fillRect(cx + 1, y + 1, cw - 2, rh - 2);
+          } else {
+            g.strokeStyle = "rgba(48,41,33,0.5)";
+            g.lineWidth = 0.5;
+            g.strokeRect(cx + 1, y + 1, cw - 2, rh - 2);
+          }
         }
       }
     }
