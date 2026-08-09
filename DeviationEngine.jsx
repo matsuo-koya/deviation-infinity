@@ -1848,9 +1848,11 @@ export default function DeviationEngine() {
     const gx0 = marginX + labelW;
     const gw = w - gx0 - marginX;
     const rows = LAYERS.length;
-    // BASS行はピアノロールにして音高の変化を見せるため、6行ぶんの高さを取る
-    const baseH = clamp((h * 0.5) / (rows + 5), 11, 20);
-    const rowHFor = (ln) => (ln === "bass" ? baseH * 6 : baseH);
+    // BASS/ACID/PIANOはピアノロールにして音高の変化を見せる。行数単位で高さを取る
+    const ROLL_UNITS = { bass: 6, acid: 4, piano: 4 };
+    const unitsTotal = LAYERS.reduce((s, ln) => s + (ROLL_UNITS[ln] || 1), 0);
+    const baseH = clamp((h * 0.5) / unitsTotal, 10, 20);
+    const rowHFor = (ln) => baseH * (ROLL_UNITS[ln] || 1);
     const gh = LAYERS.reduce((s, ln) => s + rowHFor(ln), 0);
     const headH = 15;
     const gy0 = h - gh - 14;
@@ -1899,25 +1901,30 @@ export default function DeviationEngine() {
       g.fillText(LAYER_JP[l] || l, gx0 - 7, y + rh / 2 + 3.5);
       g.textAlign = "left";
 
-      if (l === "bass") {
-        // --- BASSはピアノロール。発音時と同じ式で音高を導出し、音域窓の
-        //     中の高さに置く。和音が動けばロールも動き、スライドは線で示す。
-        const low = e.root + 3;                    // = kick基音 + 12（音域窓の下端）
-        const span = Math.max(1, spreadRef.current);
+      if (ROLL_UNITS[l]) {
+        // --- ピアノロール。発音時と同じ式で音高を導出し、音域窓の中の高さに
+        //     置く。和音が動けばロールも動き、スライドは線で示す。
+        //     BASSはキック基音基準の窓へ畳み込み、ACID/PIANOはroot+24起点。
+        const isBass = l === "bass";
+        const low = isBass ? e.root + 3 : e.root + 24;
+        const span = isBass ? Math.max(1, spreadRef.current) : 31;
         const noteH = Math.max(3, ((rh - 4) / span) * 1.6);
         const pitchY = (n) => y + 2 + (1 - clamp((n - low) / span, 0, 1)) * (rh - 4 - noteH);
         const noteAt = (i) => {
-          const v = at("bass", i);
+          const v = at(l, i);
           if (!v) return null;
-          const bd = safeDeg(e.scaleName, e.chordDeg, v.d);
-          const raw = e.root + 12 + degOf(e.scaleName, e.chordDeg + bd);
-          return { v, n: foldToWindow(raw, low, low + span) };
+          const dd = safeDeg(e.scaleName, e.chordDeg, v.d);
+          const raw = isBass
+            ? foldToWindow(e.root + 12 + degOf(e.scaleName, e.chordDeg + dd), low, low + span)
+            : e.root + 24 + degOf(e.scaleName, e.chordDeg + dd) + 12 * (v.oct || 0);
+          return { v, n: raw };
         };
         // ロールの枠と、現在の和音の根音線（薄いアンバー）
         g.strokeStyle = "rgba(48,41,33,0.8)";
         g.lineWidth = 0.5;
         g.strokeRect(gx0, y + 1, gw, rh - 2);
-        const rootN = foldToWindow(e.root + 12 + degOf(e.scaleName, e.chordDeg), low, low + span);
+        const rootRaw = e.root + (isBass ? 12 : 24) + degOf(e.scaleName, e.chordDeg);
+        const rootN = isBass ? foldToWindow(rootRaw, low, low + span) : rootRaw;
         const rly = pitchY(rootN) + noteH / 2;
         g.strokeStyle = "rgba(240,162,2,0.2)";
         g.beginPath();
