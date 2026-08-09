@@ -407,7 +407,6 @@ function buildAudio(lite) {
       volume: -1,
     })
   ).connect(pianoHP);
-  piano.maxPolyphony = lite ? 6 : 16;
   chan.piano.connect(verbSend);   // ポストフェーダー送り
   chan.piano.connect(delaySend);
 
@@ -903,6 +902,7 @@ export default function DeviationEngine() {
   const gridRef = useRef("off");
   const autoRef = useRef(false);
   const autoKeyRef = useRef("");   // おまかせの現在割当キー。変化時だけ切り替える
+  const autoBarRef = useRef(-99);  // おまかせが最後に切り替えた小節
   const vidRef = useRef({ rec: null, chunks: [], dest: null, timer: null, mime: "" });
   const rafRef = useRef(null);
   const ctxSwapped = useRef(false);
@@ -928,7 +928,10 @@ export default function DeviationEngine() {
   useEffect(() => { overlayRef.current = overlay; }, [overlay]);
   useEffect(() => { gridRef.current = grid; }, [grid]);
   // おまかせON時はキーをリセットし、次tickで即座に現在の展開へ割り当て直す。
-  useEffect(() => { autoRef.current = auto; if (auto) autoKeyRef.current = ""; }, [auto]);
+  useEffect(() => {
+    autoRef.current = auto;
+    if (auto) { autoKeyRef.current = ""; autoBarRef.current = -99; }
+  }, [auto]);
   useEffect(() => {
     vizModeRef.current = vizMode;
     const V = vizRef.current;
@@ -1085,13 +1088,16 @@ export default function DeviationEngine() {
       if (e.fx.stutterLeft > 0) {
         e.fx.stutterLeft--;
         if (e.fx.stutterLeft === 0) {
-          // 終了時の復帰。barTickは直前のstep15で積んだスタッター予約の後に走るため、
-          // step15の「閉じる」勾配(最大~1step後)が復帰を上書きして0.015で固着し、
-          // 以後stutterLeft=0でstepTickが触れず永久に無音化していた。
-          // 未来の閉じ予約をすべて取り消してから、確実に開き直す。
+          // 終了時の復帰。barTickはstep15の時刻+1msで呼ばれるが、step15の
+          // スタッター予約は次の小節頭まで続く。復帰を早置きすると閉じ勾配に
+          // 上書きされて0.015で固着し、永久無音になる(過去のバグ)。逆に早すぎる
+          // cancelは最終ステップの断続を失わせる。次小節頭の直前で未来の予約を
+          // 払い、頭のキックより先に確実に開き直す。
           const sg = R.stutterGain.gain;
-          sg.cancelScheduledValues(time + 0.0005);
-          sg.setValueAtTime(1, time + 0.02);
+          const sd = 60 / curBpmRef.current / 4;
+          const reopen = time - 0.001 + sd;   // = step15の時刻 + 1step = 次小節の頭
+          sg.cancelScheduledValues(reopen - 0.002);
+          sg.setValueAtTime(1, reopen - 0.001);
         }
       }
     }
@@ -1691,10 +1697,16 @@ export default function DeviationEngine() {
       if (autoRef.current) {
         const plan = autoPlan(e);
         if (plan.key !== autoKeyRef.current) {
-          autoKeyRef.current = plan.key;
-          if (plan.viz !== vizModeRef.current) setVizMode(plan.viz);
-          if (plan.grid !== gridRef.current) setGrid(plan.grid);
-          if (plan.overlay !== overlayRef.current) setOverlay(plan.overlay);
+          // セクション変化は即時。帯域/eraだけの変化は4小節のドウェルを置き、
+          // エネルギーが閾値付近で往復しても画面がちらつかないようにする。
+          const secChanged = autoKeyRef.current.split(":")[0] !== plan.key.split(":")[0];
+          if (secChanged || e.bar - autoBarRef.current >= 4) {
+            autoKeyRef.current = plan.key;
+            autoBarRef.current = e.bar;
+            if (plan.viz !== vizModeRef.current) setVizMode(plan.viz);
+            if (plan.grid !== gridRef.current) setGrid(plan.grid);
+            if (plan.overlay !== overlayRef.current) setOverlay(plan.overlay);
+          }
         }
       }
       // 表示はオーディオ時刻の状態を使う。スケジュール時刻だと先行してしまう。
