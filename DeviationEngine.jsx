@@ -1848,9 +1848,9 @@ export default function DeviationEngine() {
     const gx0 = marginX + labelW;
     const gw = w - gx0 - marginX;
     const rows = LAYERS.length;
-    // BASS行はピアノロールにして音高の変化を見せるため、3行ぶんの高さを取る
-    const baseH = clamp((h * 0.5) / (rows + 2), 11, 20);
-    const rowHFor = (ln) => (ln === "bass" ? baseH * 3 : baseH);
+    // BASS行はピアノロールにして音高の変化を見せるため、6行ぶんの高さを取る
+    const baseH = clamp((h * 0.5) / (rows + 5), 11, 20);
+    const rowHFor = (ln) => (ln === "bass" ? baseH * 6 : baseH);
     const gh = LAYERS.reduce((s, ln) => s + rowHFor(ln), 0);
     const headH = 15;
     const gy0 = h - gh - 14;
